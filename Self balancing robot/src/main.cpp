@@ -20,7 +20,7 @@ float* globalAngleRoll = new float(0);
 
 
 unsigned long last_time =0;
-
+unsigned long now = 0;
 
 
 void gyro_signal(){
