@@ -83,11 +83,6 @@ if (!!window.EventSource) {
     renderer.render(scene, camera);
   }, false);
 
-  source.addEventListener('temperature_reading', function(e) {
-    console.log("temperature_reading", e.data);
-    document.getElementById("temp").innerHTML = e.data;
-  }, false);
-
   source.addEventListener('accelerometer_readings', function(e) {
     console.log("accelerometer_readings", e.data);
     var obj = JSON.parse(e.data);

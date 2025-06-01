@@ -1,27 +1,34 @@
 #include "main.h"
 
-// global variable 
-float* RateRoll = new float(0);
-float* RatePitch = new float(0);
-float* RateYaw = new float(0);
-float* AngleRoll= new float(0);
-float* AnglePitch= new float(0);
-float* AngleYaw= new float(0);
-float* AccX= new float(0);
-float* AccY= new float(0);
-float* AccZ= new float(0);
+// Global variables: replaced pointer declarations with simple floats.
+float RateRoll = 0;
+float RatePitch = 0;
+float GyroRoll = 0;
+float GyroPitch = 0;
+float globalAngleRoll = 0;
+float gyroBiasRoll = 0, gyroBiasPitch = 0, gyroBiasYaw = 0;
+bool calibrated = false;
 
-float* GyroRoll = new float(0);
-float* GyroPitch = new float(0);
+// Global variables: variable for the gyroscope and accelerometer
+float gyroX,gyroY,gyroZ;
+float accX, accY, accZ;
+float gyroXerror = 0.07;
+float gyroYerror = 0.03;
+float gyroZerror = 0.01;
+// Global variables: variable for the global acceleration and angle
+float AngleRoll,AnglePitch,AngleYaw;
+
+String gyroReading;
+String accReading;
 
 
-float* globalAngleRoll = new float(0);
+Adafruit_MPU6050 mpu;
 
-
+// Global variables: variable for time differencies
 unsigned long last_time =0;
 unsigned long now = 0;
-
-
+unsigned long dt =0;
+static uint32_t lastSignalTime = 0;
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
 
@@ -31,102 +38,145 @@ AsyncEventSource events("/events");
 // Json Variable to Hold Sensor Readings
 JSONVar readings;
 
+/// ----------------------------------------------------------
 
+
+// return the rad / s 
 void gyro_signal(){
-  // Low pass filter 
-  Wire.beginTransmission(0x68);
-  Wire.write(0x1A);
-  Wire.write(0x05);
-  Wire.endTransmission();
+  sensors_event_t accel, gyro, temp;
+  mpu.getEvent(&accel, &gyro, &temp);
 
-  // configuration of the accel
-  Wire.beginTransmission(0x68);
-  Wire.write(0x1C);
-  Wire.write(0x10);
-  Wire.endTransmission();
-  Wire.beginTransmission(0x68);
-  Wire.write(0x3B);
-  Wire.endTransmission();
-  Wire.requestFrom(0x68,6);
+  now = millis(); // get the time 
+  dt = (now -lastSignalTime) / 1000.0f; // time differencies for the angle
 
-  //value of the accel
-  int16_t AXC = Wire.read() << 8 |Wire.read();
-  int16_t AYC = Wire.read() << 8 |Wire.read();
-  int16_t AZC = Wire.read() << 8 |Wire.read();
-
-  *AccX = (float)AXC/4096;
-  *AccY = (float)AYC/4096;
-  *AccZ = (float)AZC/4096;
-
-  // global angle - accel angle
-  *AngleRoll = atan(*AccY/sqrt(*AccX * *AccX + *AccZ * *AccZ))*180/PI;// atan2(*AccX,*AccZ)*180/PI;
-  *AnglePitch = atan(*AccX/sqrt(*AccY * *AccY + *AccZ * *AccZ))*180/PI;//atan2(-*AccX,sqrt(*AccY * *AccY +*AccZ * *AccZ))*180 / PI;
-
-  // Gyroscope
+  float gx = gyro.gyro.x - gyroBiasRoll;
+  float gy = gyro.gyro.y - gyroBiasPitch;
+  float gz = gyro.gyro.z - gyroBiasYaw;
   
-  // configuration of the gyroscope 
-  Wire.beginTransmission(0x68);
-  Wire.write(0x1B);
-  Wire.write(0x8);
-  Wire.endTransmission();
-  Wire.beginTransmission(0x68);
-  Wire.write(0x43);
-  Wire.endTransmission();
-  Wire.requestFrom(0x68,6);
+  // Debug: print raw values
+  Serial.printf("Raw: gx:%.3f, gy:%.3f, gz:%.3f, dt:%.4f\n", gyro.gyro.x, gyro.gyro.y, gyro.gyro.z, dt);
+  Serial.printf("Adjusted: gx:%.3f, gy:%.3f, gz:%.3f\n", gx, gy, gz);
+  
+  // Remove threshold conditions for debugging
+  gyroX += gx/50.0f;// * dt * RAD_TO_DEG;
+  gyroY += gy/70.0f;// * dt * RAD_TO_DEG;
+  gyroZ += gz/90.0f;//dt * RAD_TO_DEG;
+  Serial.printf("dt* 57...:%1.f",dt*RAD_TO_DEG);
+  // get the accelerometer values 
+  accX = accel.acceleration.x;
+  accY = accel.acceleration.y;
+  accZ = accel.acceleration.z;
 
-  // value of gyro 
-  int16_t GyroX = Wire.read() << 8 | Wire.read();
-  int16_t GyroY = Wire.read() << 8 | Wire.read();
-  int16_t GyroZ = Wire.read() << 8 | Wire.read();
+  lastSignalTime = now;
+  /*
 
-    // global rat - gyro angle
-  *RateRoll = (float)(GyroX/65.5);
-  *RatePitch = (float)GyroX/65.5;
-  *RateYaw = (float)GyroX/65.5;
+  unsigned long currentTime = millis();
+  float dtSignal = (currentTime - lastSignalTime) / 1000.0f; // s
+  lastSignalTime = currentTime;
+  
+  gyroX += gyro.gyro.x/50;
+  gyroY += gyro.gyro.y/70;
+  gyroZ += gyro.gyro.z/90;
 
+  accX = accel.acceleration.x;
+  accY = accel.acceleration.y;
+  accZ = accel.acceleration.z;
+
+  float r = gyro.gyro.x * RAD_TO_DEG;
+  float p = gyro.gyro.y * RAD_TO_DEG;
+  float y = gyro.gyro.z * RAD_TO_DEG;
+
+  if (calibrated) {
+      float correctedRateRoll = (r - gyroBiasRoll);
+      float correctedRatePitch = (p - gyroBiasPitch);
+      float correctedRateYaw = (y - gyroBiasYaw);
+
+      float accAngleRoll = atan2f(accel.acceleration.y, accel.acceleration.z) * RAD_TO_DEG;
+      float accAnglePitch = atan2f(-accel.acceleration.x, sqrtf(accel.acceleration.y*accel.acceleration.y +
+                                                                  accel.acceleration.z*accel.acceleration.z)) * RAD_TO_DEG;
+      float alpha = 0.98;
+      AngleRoll   = alpha * (AngleRoll   + correctedRateRoll * dtSignal) + (1 - alpha) * accAngleRoll;
+      AnglePitch  = alpha * (AnglePitch  + correctedRatePitch * dtSignal) + (1 - alpha) * accAnglePitch;
+      AngleYaw   += correctedRateYaw * dtSignal;
+  } else {
+      AngleRoll  += r * dtSignal;
+      AnglePitch += p * dtSignal;
+      AngleYaw   += y * dtSignal;
+  }*/
+}
+
+void calibrateGyro() {
+    const int sampleCount = 1000;
+    float sumRoll = 0, sumPitch = 0, sumYaw = 0;
+    sensors_event_t accel, gyro, temp;
+    for (int i = 0; i < sampleCount; i++) {
+        mpu.getEvent(&accel, &gyro, &temp);
+        sumRoll  += gyro.gyro.x;
+        sumPitch += gyro.gyro.y;
+        sumYaw   += gyro.gyro.z;
+        delay(10);
+    }
+    gyroBiasRoll = sumRoll / sampleCount;
+    gyroBiasPitch = sumPitch / sampleCount;
+    gyroBiasYaw = sumYaw / sampleCount;
+    calibrated = true;
+    Serial.println("Gyro calibrated.");
+}
+
+
+/// initialisation of the IMU
+void initIMU()
+{
+  if (!mpu.begin()) {
+    Serial.println(F("MPU-6050 absent !"));
+  }
+  Serial.println(F("MPU-6050 prêt"));
 }
 
 void initWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
-  Serial.println("");
-  Serial.print("Connecting to WiFi...");
+  Serial.print("Connecting to WiFi ..");
   while (WiFi.status() != WL_CONNECTED) {
-    Serial.print(".");
+    Serial.print('.');
     delay(1000);
   }
-  Serial.println("");
   Serial.println(WiFi.localIP());
 }
 
-String getGyroReadings(){
-    // Utilise les variables globales RateRoll, RatePitch et RateYaw et ne relit pas les valeurs du gyroscope
-    readings["gyroX"] = String(*RateRoll);
-    readings["gyroY"] = String(*RatePitch);
-    readings["gyroZ"] = String(*RateYaw);
+void initLittleFS() {
+  if (!LittleFS.begin()) {
+    Serial.println("An error has occurred while mounting LittleFS");
+  }
+  Serial.println("LittleFSmounted successfully");
+}
 
-    String jsonString = JSON.stringify(readings);
-    return jsonString;
+
+
+String getGyroReadings(){
+    JSONVar localReadings;
+    localReadings["gyroX"] = String(gyroX);
+    localReadings["gyroY"] = String(gyroY);
+    localReadings["gyroZ"] = String(gyroZ);
+    return JSON.stringify(localReadings);
 }
 
 String getAccReadings(){
-    // Utilise les variables globales AccX, AccY et AccZ et ne relit pas les valeurs de l'accéléromètre
-    readings["accX"] = String(*AccX);
-    readings["accY"] = String(*AccY);
-    readings["accZ"] = String(*AccZ);
-
-    String jsonString = JSON.stringify(readings);
-    return jsonString;
+    JSONVar localReadings;
+    localReadings["accX"] = String(accX);
+    localReadings["accY"] = String(accY);
+    localReadings["accZ"] = String(accZ);
+    return JSON.stringify(localReadings);
 }
 
-String getTemperature(){
-    // Retourne toujours la valeur "5" pour la température
-    readings["temperature"] = "5";
-    String jsonString = JSON.stringify(readings);
-    return jsonString;
-}
 
 void setup() {
+  // Initialisation of the modules
+  Serial.begin(115200);
+  initIMU();
+  initWiFi();
+  initLittleFS();
+
   // Handle Web Server
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send(LittleFS, "/index.html", "text/html");
@@ -135,74 +185,55 @@ void setup() {
   server.serveStatic("/", LittleFS, "/");
 
   server.on("/reset", HTTP_GET, [](AsyncWebServerRequest *request){
-    RateRoll=0;
-    RatePitch=0;
-    RateYaw=0;
+    gyroX = 0;
+    gyroY = 0;
+    gyroZ = 0;
     request->send(200, "text/plain", "OK");
   });
 
 
+  // server action for sending data 
   server.on("/resetX", HTTP_GET, [](AsyncWebServerRequest *request){
-    RateRoll=0;
+    gyroX = 0;
     request->send(200, "text/plain", "OK");
   });
 
   server.on("/resetY", HTTP_GET, [](AsyncWebServerRequest *request){
-    RatePitch=0;
+    gyroY = 0;
     request->send(200, "text/plain", "OK");
   });
 
   server.on("/resetZ", HTTP_GET, [](AsyncWebServerRequest *request){
-    RateYaw=0;
+    gyroZ = 0;
     request->send(200, "text/plain", "OK");
   });
+
+
 
   // Handle Web Server Events
   events.onConnect([](AsyncEventSourceClient *client){
     if(client->lastId()){
       Serial.printf("Client reconnected! Last message ID that it got is: %u\n", client->lastId());
     }
-    // send event with message "hello!", id current millis
-    // and set reconnect delay to 1 second
     client->send("hello!", NULL, millis(), 10000);
   });
   server.addHandler(&events);
-
   server.begin();
-  Serial.begin(115200);
-  Wire.begin();
-  Wire.setClock(400000);
-  
-
   delay(250);
-
-  Wire.beginTransmission(0x68);
-  Wire.write(0x6B);
-  Wire.write(0x00);
-  Wire.endTransmission();
-
-    
+  lastSignalTime = millis();
 }
 
+
+
+
 void loop() {
-    gyro_signal();
-    now = millis();
-    float dt = (now -last_time)/1000;
-    last_time = now;
-    Serial.print(*AngleRoll);
-    Serial.print("   ");
-    Serial.print(*AnglePitch);
-    Serial.print("   ");
-    *GyroRoll +=*RateRoll*dt;
-    *GyroPitch +=*RatePitch*dt;
+  if (!calibrated) {
+      calibrateGyro();
+      lastSignalTime = millis();
+  }
 
-
-    *globalAngleRoll = (0.02*(*AngleRoll) + 0.98*(*GyroRoll));
-    Serial.print(*globalAngleRoll);
-    Serial.println("   ");
-
-    delay(50); // Court délai pour la stabilité
-
+  gyro_signal();
+  // send the data to the server
   if ((millis() - lastTime) > gyroDelay) {
     // Send Events to the Web Server with the Sensor Readings
     events.send(getGyroReadings().c_str(),"gyro_readings",millis());
@@ -212,11 +243,6 @@ void loop() {
     // Send Events to the Web Server with the Sensor Readings
     events.send(getAccReadings().c_str(),"accelerometer_readings",millis());
     lastTimeAcc = millis();
-  }
-  if ((millis() - lastTimeTemperature) > temperatureDelay) {
-    // Send Events to the Web Server with the Sensor Readings
-    events.send(getTemperature().c_str(),"temperature_reading",millis());
-    lastTimeTemperature = millis();
-  }
-
+  }  
+  Serial.printf("Angles  X:%.1f  Y:%.1f  Z:%.1f\n", gyroX, gyroY, gyroZ);
 }
