@@ -28,7 +28,7 @@ Adafruit_MPU6050 mpu;
 unsigned long last_time =0;
 unsigned long now = 0;
 unsigned long dt =0;
-static uint32_t lastSignalTime = 0;
+unsigned long lastSignalTime = 0;
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
 
@@ -47,27 +47,24 @@ void gyro_signal(){
   mpu.getEvent(&accel, &gyro, &temp);
 
   now = millis(); // get the time 
-  dt = (now -lastSignalTime) / 1000.0f; // time differencies for the angle
-
+  dt = (now -lastSignalTime); // time differencies for the angle
   float gx = gyro.gyro.x - gyroBiasRoll;
   float gy = gyro.gyro.y - gyroBiasPitch;
   float gz = gyro.gyro.z - gyroBiasYaw;
   
   // Debug: print raw values
-  Serial.printf("Raw: gx:%.3f, gy:%.3f, gz:%.3f, dt:%.4f\n", gyro.gyro.x, gyro.gyro.y, gyro.gyro.z, dt);
-  Serial.printf("Adjusted: gx:%.3f, gy:%.3f, gz:%.3f\n", gx, gy, gz);
-  
+  Serial.printf("dt:%.f  now:%.lu  lastSignal:%.lu  gyroX:%.1f  \n" ,RAD_TO_DEG*(float)dt/1000, now, lastSignalTime, gyroX);
+
   // Remove threshold conditions for debugging
-  gyroX += gx/50.0f;// * dt * RAD_TO_DEG;
-  gyroY += gy/70.0f;// * dt * RAD_TO_DEG;
-  gyroZ += gz/90.0f;//dt * RAD_TO_DEG;
-  Serial.printf("dt* 57...:%1.f",dt*RAD_TO_DEG);
+  gyroX += gx* ((float)dt/1000 * RAD_TO_DEG);
+  gyroY += gy * ((float)dt/1000 * RAD_TO_DEG);
+  gyroZ += gz* ((float)dt/1000 * RAD_TO_DEG);
   // get the accelerometer values 
   accX = accel.acceleration.x;
   accY = accel.acceleration.y;
   accZ = accel.acceleration.z;
-
   lastSignalTime = now;
+
   /*
 
   unsigned long currentTime = millis();
@@ -155,9 +152,9 @@ void initLittleFS() {
 
 String getGyroReadings(){
     JSONVar localReadings;
-    localReadings["gyroX"] = String(gyroX);
-    localReadings["gyroY"] = String(gyroY);
-    localReadings["gyroZ"] = String(gyroZ);
+    localReadings["gyroX"] = String(gyroX*DEG_TO_RAD);
+    localReadings["gyroY"] = String(gyroY*DEG_TO_RAD);
+    localReadings["gyroZ"] = String(gyroZ*DEG_TO_RAD);
     return JSON.stringify(localReadings);
 }
 
@@ -220,16 +217,12 @@ void setup() {
   server.addHandler(&events);
   server.begin();
   delay(250);
-  lastSignalTime = millis();
 }
-
-
 
 
 void loop() {
   if (!calibrated) {
       calibrateGyro();
-      lastSignalTime = millis();
   }
 
   gyro_signal();
@@ -244,5 +237,4 @@ void loop() {
     events.send(getAccReadings().c_str(),"accelerometer_readings",millis());
     lastTimeAcc = millis();
   }  
-  Serial.printf("Angles  X:%.1f  Y:%.1f  Z:%.1f\n", gyroX, gyroY, gyroZ);
 }

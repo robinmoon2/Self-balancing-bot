@@ -1,5 +1,4 @@
 let scene, camera, rendered, cube;
-
 function parentWidth(elem) {
   return elem.parentElement.clientWidth;
 }
