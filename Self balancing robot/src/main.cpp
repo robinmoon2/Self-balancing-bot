@@ -12,11 +12,12 @@ bool calibrated = false;
 // Global variables: variable for the gyroscope and accelerometer
 float gyroX,gyroY,gyroZ;
 float accX, accY, accZ;
+float acc_angle_y,acc_angle_x;
+float total_angle_x, total_angle_y;
 float gyroXerror = 0.07;
 float gyroYerror = 0.03;
 float gyroZerror = 0.01;
-// Global variables: variable for the global acceleration and angle
-float AngleRoll,AnglePitch,AngleYaw;
+
 
 String gyroReading;
 String accReading;
@@ -53,53 +54,28 @@ void gyro_signal(){
   float gz = gyro.gyro.z - gyroBiasYaw;
   
   // Debug: print raw values
-  Serial.printf("dt:%.f  now:%.lu  lastSignal:%.lu  gyroX:%.1f  \n" ,RAD_TO_DEG*(float)dt/1000, now, lastSignalTime, gyroX);
+  //  Serial.printf("dt:%.f  now:%.lu  lastSignal:%.lu  gyroX:%.1f  \n" ,RAD_TO_DEG*(float)dt/1000, now, lastSignalTime, gyroX);
 
   // Remove threshold conditions for debugging
-  gyroX += gx* ((float)dt/1000 * RAD_TO_DEG);
-  gyroY += gy * ((float)dt/1000 * RAD_TO_DEG);
-  gyroZ += gz* ((float)dt/1000 * RAD_TO_DEG);
+  float dt_s = (float)dt*0.001f;
+  gyroX += gx* dt_s;
+  gyroY += gy *dt_s;
+  gyroZ += gz* dt_s;
+
   // get the accelerometer values 
   accX = accel.acceleration.x;
   accY = accel.acceleration.y;
   accZ = accel.acceleration.z;
+
+  // Acceleration angles 
+  acc_angle_x = (atan((accY)/sqrt(pow(accX,2) + pow(accY,2))));
+  acc_angle_y = (atan(-1*(accX)/sqrt(pow(accY,2) + pow(accZ,2))));
+
+  // Total angle and filter 
+  total_angle_x = 0.98f * (total_angle_x + gx*dt_s) + 0.02f * acc_angle_x;
+  total_angle_y = 0.98f * (total_angle_y + gy*dt_s) + 0.02f * acc_angle_y;
+
   lastSignalTime = now;
-
-  /*
-
-  unsigned long currentTime = millis();
-  float dtSignal = (currentTime - lastSignalTime) / 1000.0f; // s
-  lastSignalTime = currentTime;
-  
-  gyroX += gyro.gyro.x/50;
-  gyroY += gyro.gyro.y/70;
-  gyroZ += gyro.gyro.z/90;
-
-  accX = accel.acceleration.x;
-  accY = accel.acceleration.y;
-  accZ = accel.acceleration.z;
-
-  float r = gyro.gyro.x * RAD_TO_DEG;
-  float p = gyro.gyro.y * RAD_TO_DEG;
-  float y = gyro.gyro.z * RAD_TO_DEG;
-
-  if (calibrated) {
-      float correctedRateRoll = (r - gyroBiasRoll);
-      float correctedRatePitch = (p - gyroBiasPitch);
-      float correctedRateYaw = (y - gyroBiasYaw);
-
-      float accAngleRoll = atan2f(accel.acceleration.y, accel.acceleration.z) * RAD_TO_DEG;
-      float accAnglePitch = atan2f(-accel.acceleration.x, sqrtf(accel.acceleration.y*accel.acceleration.y +
-                                                                  accel.acceleration.z*accel.acceleration.z)) * RAD_TO_DEG;
-      float alpha = 0.98;
-      AngleRoll   = alpha * (AngleRoll   + correctedRateRoll * dtSignal) + (1 - alpha) * accAngleRoll;
-      AnglePitch  = alpha * (AnglePitch  + correctedRatePitch * dtSignal) + (1 - alpha) * accAnglePitch;
-      AngleYaw   += correctedRateYaw * dtSignal;
-  } else {
-      AngleRoll  += r * dtSignal;
-      AnglePitch += p * dtSignal;
-      AngleYaw   += y * dtSignal;
-  }*/
 }
 
 void calibrateGyro() {
@@ -152,9 +128,9 @@ void initLittleFS() {
 
 String getGyroReadings(){
     JSONVar localReadings;
-    localReadings["gyroX"] = String(gyroX*DEG_TO_RAD);
-    localReadings["gyroY"] = String(gyroY*DEG_TO_RAD);
-    localReadings["gyroZ"] = String(gyroZ*DEG_TO_RAD);
+    localReadings["gyroX"] = String(gyroX);
+    localReadings["gyroY"] = String(gyroY);
+    localReadings["gyroZ"] = String(gyroZ);
     return JSON.stringify(localReadings);
 }
 
@@ -167,6 +143,26 @@ String getAccReadings(){
 }
 
 
+
+float PID(float current_angle){
+  // Error - Proportionnal
+  if(dt == 0){return 0;}
+  float dt_s = (float)dt * 0.001f;
+  float error = target_angle-current_angle;
+
+  // Integral term
+  integral += error*dt_s;
+  integral = constrain(integral,-I_MAX, I_MAX);
+
+  // Derivate turm 
+  float derivate = (current_angle - oldvalue) / dt_s;
+  oldvalue = current_angle;
+  float result_PID = (error*Kp) + (integral*Ki) + (derivate*Kd);
+  
+  Serial.printf("P : %f , I : %f , D: %f\n",error,integral,derivate);
+  return result_PID;
+}
+
 void setup() {
   // Initialisation of the modules
   Serial.begin(115200);
@@ -174,6 +170,12 @@ void setup() {
   initWiFi();
   initLittleFS();
 
+  pinMode(RIGHT_MOTOR_ENA_1,OUTPUT);
+  pinMode(RIGHT_MOTOR_ENA_2,OUTPUT);
+  pinMode(LEFT_MOTOR_ENA_1,OUTPUT);
+  pinMode(LEFT_MOTOR_ENA_2,OUTPUT);
+  pinMode(LEFT_MOTOR_PWM_1,OUTPUT);
+  pinMode(RIGHT_MOTOR_PWM_1,OUTPUT);
   // Handle Web Server
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send(LittleFS, "/index.html", "text/html");
@@ -219,13 +221,25 @@ void setup() {
   delay(250);
 }
 
+void directionRight(bool direction){
+  digitalWrite(RIGHT_MOTOR_ENA_1, (direction ? HIGH : LOW));
+  digitalWrite(RIGHT_MOTOR_ENA_2, (direction ? LOW : HIGH));
+}
+
+void directionLeft(bool direction){
+  digitalWrite(LEFT_MOTOR_ENA_1, (direction ? HIGH : LOW));
+  digitalWrite(LEFT_MOTOR_ENA_2, (direction ? LOW : HIGH));
+}
+
 
 void loop() {
   if (!calibrated) {
       calibrateGyro();
   }
 
+  // Acquisition of the angles
   gyro_signal();
+
   // send the data to the server
   if ((millis() - lastTime) > gyroDelay) {
     // Send Events to the Web Server with the Sensor Readings
@@ -237,4 +251,16 @@ void loop() {
     events.send(getAccReadings().c_str(),"accelerometer_readings",millis());
     lastTimeAcc = millis();
   }  
+
+  // PID code
+
+  float motorInput = PID(total_angle_x);
+  if(abs(motorInput) < 5)
+    motorInput == 0;
+  Serial.printf("Total_angle_y : %f, PID response %f\n", total_angle_y,motorInput);
+  directionLeft(motorInput > 0);
+  directionRight(motorInput > 0 );
+  analogWrite(RIGHT_MOTOR_PWM_1,constrain(abs(motorInput), 0, 255));
+  analogWrite(LEFT_MOTOR_PWM_1,constrain(abs(motorInput), 0, 255));
+
 }
