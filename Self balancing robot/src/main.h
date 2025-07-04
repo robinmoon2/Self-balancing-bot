@@ -28,9 +28,10 @@ float target_angle = 0;
 float integral = 0;
 float oldvalue = 0;
 
-float Kp= 7;
-float Ki = 6;
-float Kd = 3;
+float Kp = 70.0f;
+float Ki = 0.0f;
+float Kd = 30.0f;
+float motorInput =0;
 
 // Definition of the Motor PIN : 
 #define RIGHT_MOTOR_ENA_1 33
@@ -43,7 +44,8 @@ float Kd = 3;
 #define LEFT_MOTOR_PWM_1 14
 //#define LEFT_MOTOR_PWM_2 
 
+#define MAX 255
 
-#define I_MAX 255
+const float INTEGRAL_MAX = 100.0f;
 
 #endif

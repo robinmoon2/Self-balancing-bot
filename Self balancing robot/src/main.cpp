@@ -49,6 +49,7 @@ void gyro_signal(){
 
   now = millis(); // get the time 
   dt = (now -lastSignalTime); // time differencies for the angle
+  if(dt == 0) return;
   float gx = gyro.gyro.x - gyroBiasRoll;
   float gy = gyro.gyro.y - gyroBiasPitch;
   float gz = gyro.gyro.z - gyroBiasYaw;
@@ -68,11 +69,11 @@ void gyro_signal(){
   accZ = accel.acceleration.z;
 
   // Acceleration angles 
-  acc_angle_x = (atan((accY)/sqrt(pow(accX,2) + pow(accY,2))));
-  acc_angle_y = (atan(-1*(accX)/sqrt(pow(accY,2) + pow(accZ,2))));
+  acc_angle_x = atan2(accY, accZ); //(atan((accY)/sqrt(pow(accX,2) + pow(accY,2))));
+  acc_angle_y = atan2(-accX, sqrt(accY*accY + accZ*accZ));//(atan(-1*(accX)/sqrt(pow(accY,2) + pow(accZ,2))));
 
   // Total angle and filter 
-  total_angle_x = 0.98f * (total_angle_x + gx*dt_s) + 0.02f * acc_angle_x;
+  total_angle_x = 0.98f * (total_angle_x + gx*dt_s) + 0.02f * acc_angle_y;
   total_angle_y = 0.98f * (total_angle_y + gy*dt_s) + 0.02f * acc_angle_y;
 
   lastSignalTime = now;
@@ -146,20 +147,22 @@ String getAccReadings(){
 
 float PID(float current_angle){
   // Error - Proportionnal
-  if(dt == 0){return 0;}
+  if(dt == 0){return motorInput;}
   float dt_s = (float)dt * 0.001f;
+
   float error = target_angle-current_angle;
 
+  /**/
   // Integral term
   integral += error*dt_s;
-  integral = constrain(integral,-I_MAX, I_MAX);
+  integral = constrain(integral, -INTEGRAL_MAX, INTEGRAL_MAX);   // anti-wind-up
 
   // Derivate turm 
   float derivate = (current_angle - oldvalue) / dt_s;
   oldvalue = current_angle;
   float result_PID = (error*Kp) + (integral*Ki) + (derivate*Kd);
-  
-  Serial.printf("P : %f , I : %f , D: %f\n",error,integral,derivate);
+  result_PID = constrain(result_PID,-MAX,MAX);
+  Serial.printf("P : %f\n",error);//,integral,derivate);
   return result_PID;
 }
 
@@ -167,16 +170,25 @@ void setup() {
   // Initialisation of the modules
   Serial.begin(115200);
   initIMU();
-  initWiFi();
-  initLittleFS();
-
+  calibrateGyro();
+  lastSignalTime = millis();
+  //initWiFi();
+  //initLittleFS();
+  target_angle = 0.0;       
   pinMode(RIGHT_MOTOR_ENA_1,OUTPUT);
   pinMode(RIGHT_MOTOR_ENA_2,OUTPUT);
   pinMode(LEFT_MOTOR_ENA_1,OUTPUT);
   pinMode(LEFT_MOTOR_ENA_2,OUTPUT);
   pinMode(LEFT_MOTOR_PWM_1,OUTPUT);
   pinMode(RIGHT_MOTOR_PWM_1,OUTPUT);
+  
+  // Setup PWM 
+  ledcSetup(0, 20000, 9);                 // canal 0, 20 kHz, 8 bits
+  ledcAttachPin(RIGHT_MOTOR_PWM_1, 0);
+  ledcAttachPin(LEFT_MOTOR_PWM_1,  0);
+
   // Handle Web Server
+  /*
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send(LittleFS, "/index.html", "text/html");
   });
@@ -218,7 +230,7 @@ void setup() {
   });
   server.addHandler(&events);
   server.begin();
-  delay(250);
+  delay(250);*/
 }
 
 void directionRight(bool direction){
@@ -241,6 +253,8 @@ void loop() {
   gyro_signal();
 
   // send the data to the server
+  /*
+
   if ((millis() - lastTime) > gyroDelay) {
     // Send Events to the Web Server with the Sensor Readings
     events.send(getGyroReadings().c_str(),"gyro_readings",millis());
@@ -250,17 +264,26 @@ void loop() {
     // Send Events to the Web Server with the Sensor Readings
     events.send(getAccReadings().c_str(),"accelerometer_readings",millis());
     lastTimeAcc = millis();
-  }  
+  }  */
 
   // PID code
 
-  float motorInput = PID(total_angle_x);
-  if(abs(motorInput) < 5)
-    motorInput == 0;
-  Serial.printf("Total_angle_y : %f, PID response %f\n", total_angle_y,motorInput);
-  directionLeft(motorInput > 0);
-  directionRight(motorInput > 0 );
-  analogWrite(RIGHT_MOTOR_PWM_1,constrain(abs(motorInput), 0, 255));
-  analogWrite(LEFT_MOTOR_PWM_1,constrain(abs(motorInput), 0, 255));
+  motorInput = PID(total_angle_x);
+  //if(abs(motorInput) < 3) motorInput = 0;
+
+  bool forward = motorInput >= 0;
+
+  
+  directionLeft(forward);
+  directionRight(forward);
+    
+  uint8_t pwm = abs((int)motorInput);
+  if (abs(pwm)<30) pwm = 0; else pwm = map(abs(pwm), 30, 255, 0, 255);
+  Serial.printf("Total_angle_x : %f, PID response %f, PWM : %u\n", total_angle_y,motorInput,pwm);
+
+  pwm = constrain(pwm, 0, 255);
+  analogWrite(RIGHT_MOTOR_PWM_1,pwm);
+  analogWrite(LEFT_MOTOR_PWM_1,pwm);
+
 
 }
