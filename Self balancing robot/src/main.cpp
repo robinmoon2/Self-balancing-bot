@@ -73,7 +73,7 @@ void gyro_signal(){
   acc_angle_y = atan2(-accX, sqrt(accY*accY + accZ*accZ));//(atan(-1*(accX)/sqrt(pow(accY,2) + pow(accZ,2))));
 
   // Total angle and filter 
-  total_angle_x = 0.98f * (total_angle_x + gx*dt_s) + 0.02f * acc_angle_y;
+  total_angle_x = 0.98f * (total_angle_x + gx*dt_s) + 0.02f * acc_angle_x;
   total_angle_y = 0.98f * (total_angle_y + gy*dt_s) + 0.02f * acc_angle_y;
 
   lastSignalTime = now;
@@ -174,7 +174,6 @@ void setup() {
   lastSignalTime = millis();
   //initWiFi();
   //initLittleFS();
-  target_angle = 0.0;       
   pinMode(RIGHT_MOTOR_ENA_1,OUTPUT);
   pinMode(RIGHT_MOTOR_ENA_2,OUTPUT);
   pinMode(LEFT_MOTOR_ENA_1,OUTPUT);
@@ -268,7 +267,7 @@ void loop() {
 
   // PID code
 
-  motorInput = PID(total_angle_x);
+  motorInput = PID(total_angle_y);
   //if(abs(motorInput) < 3) motorInput = 0;
 
   bool forward = motorInput >= 0;
@@ -278,12 +277,10 @@ void loop() {
   directionRight(forward);
     
   uint8_t pwm = abs((int)motorInput);
-  if (abs(pwm)<30) pwm = 0; else pwm = map(abs(pwm), 30, 255, 0, 255);
+  //if (abs(pwm)<30) pwm = 0; else pwm = 30;
   Serial.printf("Total_angle_x : %f, PID response %f, PWM : %u\n", total_angle_y,motorInput,pwm);
 
   pwm = constrain(pwm, 0, 255);
   analogWrite(RIGHT_MOTOR_PWM_1,pwm);
   analogWrite(LEFT_MOTOR_PWM_1,pwm);
-
-
 }

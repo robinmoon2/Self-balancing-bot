@@ -24,13 +24,13 @@ unsigned long lastTimeAcc = 0;
 unsigned long gyroDelay = 50;
 unsigned long accelerometerDelay = 200;
 
-float target_angle = 0;
+float target_angle = -0.65f;
 float integral = 0;
 float oldvalue = 0;
 
 float Kp = 70.0f;
-float Ki = 0.0f;
-float Kd = 30.0f;
+float Ki = 1.0f;
+float Kd = 6.0f;
 float motorInput =0;
 
 // Definition of the Motor PIN : 
